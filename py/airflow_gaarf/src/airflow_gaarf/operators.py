@@ -19,7 +19,7 @@ from airflow.utils.context import Context
 
 from gaarf.utils import get_customer_ids
 from gaarf.query_executor import AdsQueryExecutor  # type: ignore
-from gaarf.io.writer import AbsWriter  # type: ignore
+from gaarf.io.writers.abs_writer import AbsWriter  # type: ignore
 from gaarf.io.reader import AbsReader  # type: ignore
 
 from .hooks import GaarfHook, GaarfBqHook  # type: ignore
@@ -55,7 +55,9 @@ class GaarfOperator(BaseOperator):
         client = GaarfHook(google_ads_conn_id=self.google_ads_conn_id,
                            api_version=self.api_version)
         executor = AdsQueryExecutor(client.get_client)
-        executor.execute(self.query, self.customer_ids, self.reader_client,
+        # Hardcoding query name for now
+        # Previous arguments were wrong
+        executor.execute(self.query, "report", self.customer_ids,
                          self.writer_client, self.query_params,
                          self.optimize_performance)
 
