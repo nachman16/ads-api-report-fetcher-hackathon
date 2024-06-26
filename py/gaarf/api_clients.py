@@ -31,8 +31,11 @@ import yaml
 from google import protobuf
 from google.ads.googleads import client as googleads_client
 from google.api_core import exceptions as google_exceptions
+from bingads.service_client import ServiceClient as bing_service_client
+from bingads.authorization import AuthorizationData as bing_authorization_data, OAuthDesktopMobileAuthCodeGrant as bing_auth_code_grant
 
 GOOGLE_ADS_API_VERSION: Final = googleads_client._DEFAULT_VERSION
+BING_ADS_API_VERSION: Final = '13'
 google_ads_service = importlib.import_module(
   f'google.ads.googleads.{GOOGLE_ADS_API_VERSION}.'
   'services.types.google_ads_service'
@@ -72,7 +75,6 @@ class BaseClient:
     self.api_version = (
       str(version) if str(version).startswith('v') else f'v{version}'
     )
-    self.google_ads_row = self._get_google_ads_row(self.api_version)
 
   @property
   def _base_module(self) -> str:
@@ -284,6 +286,7 @@ class GoogleAdsApiClient(BaseClient):
             credentials.
     """
     super().__init__(version)
+    self.google_ads_row = self._get_google_ads_row(self.api_version)
     self.client = self._init_client(
       path=path_to_config, config_dict=config_dict, yaml_str=yaml_str
     )
@@ -364,7 +367,139 @@ class GoogleAdsApiClient(BaseClient):
     except ValueError:
       raise ValueError('Cannot instantiate GoogleAdsClient')
 
+class BingAdsApiClient(BaseClient):
+  """Client to interact with the Bing Ads API
+
+  """
+
+  default_bing_ads_yaml = str(Path.home() / 'bing-ads.yaml')
+
+  def __init__(
+    self,
+    path_to_config: str | os.PathLike = default_bing_ads_yaml,
+    config_dict: dict[str, str] | None = None,
+    yaml_str: str | None = None,
+    version: str = BING_ADS_API_VERSION,
+    use_proto_plus: bool = True
+  ) -> None:
+    super().__init__(version)
+    self.api_version=version
+    self.customer_client = self._init_client(
+      client_name='CustomerManagementService',
+      path=path_to_config,
+      config_dict=config_dict,
+      yaml_str=yaml_str
+    )
+    self.reporting_client = self._init_client(
+      client_name='ReportingService',
+      path=path_to_config,
+      config_dict=config_dict,
+      yaml_str=yaml_str
+    )
+
+  def get_response(
+    self, entity_id: int | None, query_text: str, query_title: str | None = None
+  ):
+    user=self.customer_client.GetUser(
+      UserId=entity_id
+    ).User
+    user_id = user.Id
+    report_dict = yaml.safe_load(query_text)
+    if report_dict['service'] == 'CustomerManagement':
+      return self._customer_management_call(user_id, report_dict)
+    if report_dict['service'] == 'Reporting':
+      return {}
+
+  def _customer_management_call(
+    self, entity_id: int, report_dict: dict
+  ):
+    function_name = report_dict['source_name']
+    if hasattr(self.customer_client, function_name):
+      service_call = getattr(self.customer_client, function_name)
+      predicates={
+        'Predicate': [
+          {
+            'Field': 'UserId',
+            'Operator': 'Equals',
+            'Value': entity_id,
+          },
+        ]
+      }
+
+      target_name=report_dict['target_name']
+
+      page_index = 0
+      PAGE_SIZE=100
+      found_last_page = False
+
+      results = []
+
+      while (not found_last_page):
+        paging=set_elements_to_none(self.customer_client.factory.create('ns5:Paging'))
+        paging.Index=page_index
+        paging.Size=PAGE_SIZE
+        search_response = service_call(
+          PageInfo=paging,
+          Predicates=predicates
+        )
+        if search_response is not None and hasattr(search_response, target_name):
+          results.extend(search_response[target_name])
+          found_last_page = PAGE_SIZE > len(search_response['AdvertiserAccount'])
+          page_index += 1
+      else:
+        found_last_page=True
+      return results
+
+  def _init_client(
+    self, client_name: str, path: str, config_dict: dict[str, str], yaml_str: str
+  ) -> bing_service_client | None:
+    if config_dict:
+      return self._init_client_helper(client_name, config_dict)
+    if yaml_str:
+      dict = yaml.safe_load(yaml_str)
+      return self._init_client_helper(client_name, dict)
+    if path:
+      if os.path.isfile(path):
+        with open(path) as stream:
+          try:
+            dict = yaml.safe_load(stream)
+            return self._init_client_helper(client_name, dict)
+          except yaml.YAMLError as exc:
+            raise ValueError(exc)
+    raise ValueError('Cannot instantiate Bing Service Client')
+
+
+  def _init_client_helper(
+    self, client_name: str, config_dict: dict[str, str]
+  ) -> bing_service_client | None:
+    authorization_data=bing_authorization_data(
+      account_id=None,
+      customer_id=None,
+      developer_token=config_dict['service_token'],
+      authentication=None,
+    )
+    customer_service=bing_service_client(
+      service=client_name,
+      version=int(self.api_version),
+      authorization_data=authorization_data,
+      environment='production'
+    )
+    authentication = bing_auth_code_grant(
+      client_id=config_dict['client_id'],
+      env='production'
+    )
+    authentication.client_secret=config_dict['client_secret']
+    authorization_data.authentication = authentication
+
+    authorization_data.authentication.request_oauth_tokens_by_refresh_token(config_dict['refresh_token'])
+    return customer_service
+
 
 def clean_resource(resource: str) -> str:
   """Converts nested resource to a TitleCase format."""
   return resource.title().replace('_', '')
+
+def set_elements_to_none(suds_object):
+  for (element) in suds_object:
+    suds_object.__setitem__(element[0], None)
+  return suds_object
