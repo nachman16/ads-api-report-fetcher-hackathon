@@ -426,3 +426,119 @@ class AdsReportFetcher:
     return list(
       {customer_id for customer_id in child_customer_ids if customer_id != 0}
     )
+
+class BingReportFetcher:
+  def __init__(
+    self,
+    api_client: api_clients.BaseClient,
+    customer_ids: Sequence[str] | None = None,
+  ) -> None:
+    self.api_client = api_client
+    if customer_ids:
+      warnings.warn(
+        '`AdsReportFetcher` will deprecate passing `customer_ids` '
+        'to `__init__` method. '
+        'Consider passing list of customer_ids to '
+        '`AdsReportFetcher.fetch` method',
+        category=DeprecationWarning,
+        stacklevel=3,
+      )
+      self.customer_ids = (
+        [customer_ids] if not isinstance(customer_ids, list) else customer_ids
+      )
+
+  def expand_mcc(
+    self,
+    customer_ids: str | MutableSequence,
+    customer_ids_query: str | None = None,
+  ) -> list[str]:
+    """Performs Manager account(s) expansion to child accounts.
+
+    Args:
+        customer_ids:
+            Manager account(s) to be expanded.
+        customer_ids_query:
+            Gaarf query to limit the expansion only to accounts
+            satisfying the condition.
+
+    Returns:
+        All child accounts under provided customer_ids.
+    """
+    return [customer_ids]
+
+  def fetch(
+    self,
+    query_specification: str | query_editor.QueryElements,
+    customer_ids: list[str] | str | None = None,
+    customer_ids_query: str | None = None,
+    expand_mcc: bool = False,
+    args: dict[str, Any] | None = None,
+    optimize_strategy: str = 'NONE',
+  ) -> report.GaarfReport:
+    if not isinstance(query_specification, query_editor.QueryElements):
+      query_specification = query_editor.QuerySpecification(
+        text=str(query_specification),
+        args=args,
+        api_version=self.api_client.api_version,
+        client_name='Bing'
+      ).generate()
+    parser = parsers.BingAdsRowParser(query_specification)
+    result = self._parse_bing_response(
+      query_specification,
+      customer_ids,
+      parser
+    )
+    return report.GaarfReport(
+      result,
+      query_specification.column_names,
+      [],
+      query_specification
+    )
+
+  def _parse_bing_response(
+    self,
+    query_specification: query_editor.QueryElements,
+    customer_id: str,
+    parser: parsers.BingAdsRowParser,
+    optimize_strategy: OptimizeStrategy = OptimizeStrategy.NONE,
+  ) -> list[list[tuple]]:
+    response = self.api_client.get_response(None, query_specification.query_text, query_specification.query_title)
+    return self._parse_bing_response_sequentially(response, query_specification, customer_id, parser)
+
+  def _parse_bing_response_sequentially(
+    self,
+    response: dict,
+    query_specification: query_editor.QueryElements,
+    customer_id: str,
+    parser: parsers.BingAdsRowParser,
+  ) -> list[list]:
+    total_results = []
+    logger.debug(
+      'Parsing batch for query %s for customer_id %s',
+      query_specification.query_title,
+      customer_id,
+    )
+
+    results = self._parse_batch(parser, response)
+    total_results.extend(list(results))
+    return total_results
+
+  def _parse_batch(
+    self,
+    parser: parsers.BingAdsRowParser,
+    batch,
+  ) -> Generator[list, None, None]:
+    """Parse reach row from batch of Ads API response.
+
+    Args:
+        parser:
+            An instance of parser class that transforms each row from
+            request into desired format.
+        batch:
+            Sequence of GoogleAdsRow that needs to be parsed.
+
+    Yields:
+        Parsed rows for a batch.
+    """
+    for row in batch:
+      yield parser.parse_ads_row(row)

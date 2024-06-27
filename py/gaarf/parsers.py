@@ -174,24 +174,8 @@ class EmptyMessageParser(BaseParser):
     return super().parse(element)
 
 
-class GoogleAdsRowParser:
-  """Performs parsing of a single GoogleAdsRow.
-
-  Attributes:
-      fields: Expected fields in GoogleAdsRow.
-      customizers: Customizing behaviour performed on a field.
-      virtual_columns: Elements that are not directly present in GoogleAdsRow.
-      parser: Chain of parsers to execute on a single GoogleAdsRow.
-      row_getter: Helper to easily extract fields from GogleAdsRow.
-      respect_nulls: Whether or not convert nulls to zeros.
-  """
-
+class BaseAdsParser:
   def __init__(self, query_specification: query_editor.QueryElements) -> None:
-    """Initializes GoogleAdsRowParser.
-
-    Args:
-        query_specification: All elements forming gaarf query.
-    """
     self.fields = query_specification.fields
     self.customizers = query_specification.customizers
     self.virtual_columns = query_specification.virtual_columns
@@ -217,33 +201,6 @@ class GoogleAdsRowParser:
       new_parser = parser(parser_chain)
       parser_chain = new_parser
     return parser_chain
-
-  def parse_ads_row(
-    self, row: google_ads_service.GoogleAdsRow
-  ) -> list[GoogleAdsRowElement]:
-    """Parses GoogleAdsRow by applying various transformations.
-
-    Args:
-        row: A single GoogleAdsRow.
-
-    Returns:
-        List of parsed elements.
-    """
-    parsed_row_elements: list[GoogleAdsRowElement] = []
-    extracted_attributes = self._get_attributes_from_row(row, self.row_getter)
-    index = 0
-    for column in self.column_names:
-      if column in self.virtual_columns.keys():
-        parsed_element = self._convert_virtual_column(
-          row, self.virtual_columns[column]
-        )
-      else:
-        parsed_element = self._parse_row_element(
-          extracted_attributes[index], column
-        )
-        index += 1
-      parsed_row_elements.append(parsed_element)
-    return parsed_row_elements
 
   def _parse_row_element(
     self, extracted_attribute: GoogleAdsRowElement, column: str
@@ -381,41 +338,9 @@ class GoogleAdsRowParser:
     ]
     return re.split('/', extracted_attribute)[-1]
 
-  def _get_attributes_from_row(
-    self, row: google_ads_service.GoogleAdsRow, getter: operator.attrgetter
-  ) -> tuple[GoogleAdsRowElement, ...]:
-    """Extracts attributes from GoogleAdsRow based on attribute getter.
-
-    Attribute getter contains nested attribute access operations (i.e.
-    campaign -> id) which can be easily executed on nested GoogleAdsRow
-    object.
-
-    Args:
-        row: A single GoogleAdsRow.
-        getter: Initialized attribute getter.
-
-    Returns:
-        All parsed elements from a single GoogleAdsRow..
-    """
-    attributes = getter(row)
-    if self.respect_nulls:
-      row = googleads_utils.convert_proto_plus_to_protobuf(row)
-      if row.segments.HasField('sk_ad_network_conversion_value'):
-        # Convert to list to perform modification
-        attributes = list(attributes)
-        # Replace 0 attributes in the row with None
-        attributes[
-          self.fields.index('segments.sk_ad_network_conversion_value')
-        ] = None
-        # Convert back to tuple
-        attributes = tuple(attributes)
-    else:
-      attributes = getter(row)
-    return attributes if isinstance(attributes, tuple) else (attributes,)
-
   def _convert_virtual_column(
     self,
-    row: google_ads_service.GoogleAdsRow,
+    row,
     virtual_column: query_editor.VirtualColumn,
   ) -> GoogleAdsRowElement:
     """Convert virtual column definition to a single element.
@@ -466,6 +391,132 @@ class GoogleAdsRowParser:
       except SyntaxError:
         return virtual_column.value
       return result
+
+class GoogleAdsRowParser(BaseAdsParser):
+  """Performs parsing of a single GoogleAdsRow.
+
+  Attributes:
+      fields: Expected fields in GoogleAdsRow.
+      customizers: Customizing behaviour performed on a field.
+      virtual_columns: Elements that are not directly present in GoogleAdsRow.
+      parser: Chain of parsers to execute on a single GoogleAdsRow.
+      row_getter: Helper to easily extract fields from GogleAdsRow.
+      respect_nulls: Whether or not convert nulls to zeros.
+  """
+
+  def __init__(self, query_specification: query_editor.QueryElements) -> None:
+    """Initializes GoogleAdsRowParser.
+
+    Args:
+        query_specification: All elements forming gaarf query.
+    """
+    super().__init__(query_specification)
+
+  def parse_ads_row(
+    self, row: google_ads_service.GoogleAdsRow
+  ) -> list[GoogleAdsRowElement]:
+    """Parses GoogleAdsRow by applying various transformations.
+
+    Args:
+        row: A single GoogleAdsRow.
+
+    Returns:
+        List of parsed elements.
+    """
+    parsed_row_elements: list[GoogleAdsRowElement] = []
+    extracted_attributes = self._get_attributes_from_row(row, self.row_getter)
+    index = 0
+    for column in self.column_names:
+      if column in self.virtual_columns.keys():
+        parsed_element = self._convert_virtual_column(
+          row, self.virtual_columns[column]
+        )
+      else:
+        parsed_element = self._parse_row_element(
+          extracted_attributes[index], column
+        )
+        index += 1
+      parsed_row_elements.append(parsed_element)
+    return parsed_row_elements
+
+
+
+
+
+  def _get_attributes_from_row(
+    self, row: google_ads_service.GoogleAdsRow, getter: operator.attrgetter
+  ) -> tuple[GoogleAdsRowElement, ...]:
+    """Extracts attributes from GoogleAdsRow based on attribute getter.
+
+    Attribute getter contains nested attribute access operations (i.e.
+    campaign -> id) which can be easily executed on nested GoogleAdsRow
+    object.
+
+    Args:
+        row: A single GoogleAdsRow.
+        getter: Initialized attribute getter.
+
+    Returns:
+        All parsed elements from a single GoogleAdsRow..
+    """
+    attributes = getter(row)
+    if self.respect_nulls:
+      row = googleads_utils.convert_proto_plus_to_protobuf(row)
+      if row.segments.HasField('sk_ad_network_conversion_value'):
+        # Convert to list to perform modification
+        attributes = list(attributes)
+        # Replace 0 attributes in the row with None
+        attributes[
+          self.fields.index('segments.sk_ad_network_conversion_value')
+        ] = None
+        # Convert back to tuple
+        attributes = tuple(attributes)
+    else:
+      attributes = getter(row)
+    return attributes if isinstance(attributes, tuple) else (attributes,)
+
+
+
+class BingAdsRowParser(BaseAdsParser):
+  def __init__(self, query_specification: query_editor.QueryElements) -> None:
+    """
+    Args:
+        query_specification: All elements forming gaarf query.
+    """
+    super().__init__(query_specification)
+
+  def parse_ads_row(
+    self, row: dict
+  ) -> list[GoogleAdsRowElement]:
+    """Parses GoogleAdsRow by applying various transformations.
+
+    Args:
+        row: A single GoogleAdsRow.
+
+    Returns:
+        List of parsed elements.
+    """
+    parsed_row_elements: list[GoogleAdsRowElement] = []
+    extracted_attributes = self._get_attributes_from_row(row, self.row_getter)
+    index = 0
+    for column in self.column_names:
+      if column in self.virtual_columns.keys():
+        parsed_element = self._convert_virtual_column(
+          row, self.virtual_columns[column]
+        )
+      else:
+        parsed_element = self._parse_row_element(
+          extracted_attributes[index], column
+        )
+        index += 1
+      parsed_row_elements.append(parsed_element)
+    return parsed_row_elements
+
+  def _get_attributes_from_row(
+    self, row: dict, getter: operator.attrgetter
+  ) -> tuple[GoogleAdsRowElement, ...]:
+    attributes = getter(row)
+    return attributes if isinstance(attributes, tuple) else (attributes,)
 
 
 class ResourceFormatter:

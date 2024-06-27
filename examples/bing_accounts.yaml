@@ -1,0 +1,8 @@
+service: CustomerManagement
+source_name: SearchAccounts
+target_name: AdvertiserAccount
+columns:
+  - field: Id
+    name: id
+  - field: Language
+    name: lang

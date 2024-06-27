@@ -28,6 +28,7 @@ import smart_open
 import yaml
 
 from gaarf import api_clients, exceptions, query_executor
+from gaarf.executors import ads_executor
 from gaarf.cli import utils
 from gaarf.io import reader, writer
 
@@ -36,6 +37,7 @@ def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('query', nargs='*')
   parser.add_argument('-c', '--config', dest='gaarf_config', default=None)
+  parser.add_argument('--client', dest='client_name', default='Google')
   parser.add_argument('--account', dest='account', default=None)
   parser.add_argument('--output', dest='output', default=None)
   parser.add_argument('--input', dest='input', default='file')
@@ -123,13 +125,19 @@ def main():
     config = utils.initialize_runtime_parameters(config)
   logger.debug('initialized config: %s', config)
 
-  ads_client = api_clients.GoogleAdsApiClient(
-    config_dict=google_ads_config_dict,
-    version=config.api_version,
-    use_proto_plus=main_args.optimize_performance
-    not in ('PROTOBUF', 'BATCH_PROTOBUF'),
-  )
-  ads_query_executor = query_executor.AdsQueryExecutor(ads_client)
+  ads_client = None
+  if main_args.client_name == 'Google':
+    ads_client = api_clients.GoogleAdsApiClient(
+      config_dict=google_ads_config_dict,
+      version=config.api_version,
+      use_proto_plus=main_args.optimize_performance
+      not in ('PROTOBUF', 'BATCH_PROTOBUF'),
+    )
+  if main_args.client_name == 'Bing':
+    ads_client = api_clients.BingAdsApiClient(
+
+    )
+  ads_query_executor = ads_executor.AdsQueryExecutor(api_client=ads_client, client_name=main_args.client_name)
   reader_factory = reader.ReaderFactory()
   reader_client = reader_factory.create_reader(main_args.input)
 

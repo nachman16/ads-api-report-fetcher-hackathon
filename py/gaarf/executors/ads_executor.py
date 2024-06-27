@@ -36,18 +36,22 @@ class AdsQueryExecutor:
       api_client: a client used for connecting to Ads API.
   """
 
-  def __init__(self, api_client: api_clients.BaseClient) -> None:
+  def __init__(self, api_client: api_clients.BaseClient, client_name: str = 'Google') -> None:
     """Initializes QueryExecutor.
 
     Args:
         api_client: a client used for connecting to Ads API.
     """
     self.api_client = api_client
+    self.client_name = client_name
 
   @property
-  def report_fetcher(self) -> report_fetcher.AdsReportFetcher:
+  def report_fetcher(self) -> report_fetcher.ReportFetcher:
     """Initializes AdsReportFetcher to get data from Ads API."""
-    return report_fetcher.AdsReportFetcher(self.api_client)
+    if self.client_name == 'Google':
+      return report_fetcher.AdsReportFetcher(self.api_client)
+    if self.client_name == 'Bing':
+      return report_fetcher.BingReportFetcher(self.api_client)
 
   def execute(
     self,
@@ -71,7 +75,7 @@ class AdsQueryExecutor:
             ("NONE", "PROTOBUF", "BATCH", "BATCH_PROTOBUF")
     """
     query_specification = query_editor.QuerySpecification(
-      query_text, query_name, args, self.report_fetcher.api_client.api_version
+      query_text, query_name, args, self.report_fetcher.api_client.api_version, self.client_name
     ).generate()
     results = self.report_fetcher.fetch(
       query_specification=query_specification,

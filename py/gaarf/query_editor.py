@@ -21,6 +21,7 @@ import datetime
 import operator
 import re
 
+import yaml
 from dateutil import relativedelta
 
 from gaarf import api_clients, exceptions, query_post_processor
@@ -81,6 +82,7 @@ class QueryElements:
   virtual_columns: dict[str, VirtualColumn] | None = None
   is_constant_resource: bool = False
   is_builtin_query: bool = False
+  additional: dict[str, str] | None = None
 
 
 class CommonParametersMixin:
@@ -110,11 +112,13 @@ class QuerySpecification(
     title: str | None = None,
     args: dict | None = None,
     api_version: str = api_clients.GOOGLE_ADS_API_VERSION,
+    client_name: str = 'Google'
   ) -> None:
     self.text = text
     self.title = title
     self.args = args or {}
     self.base_client = api_clients.BaseClient(api_version)
+    self.client_name = client_name
 
   @property
   def macros(self) -> dict[str, str]:
@@ -131,6 +135,8 @@ class QuerySpecification(
         Various elements parsed from a query (text, fields,
         column_names, etc).
     """
+    if self.client_name == 'Bing':
+      return self._generate_bing_helper()
 
     query_text = self.expand_jinja(self.text, self.args.get('template'))
     resource_name = self.extract_resource_from_query(query_text)
@@ -212,6 +218,31 @@ class QuerySpecification(
       resource_name=resource_name,
       is_constant_resource=is_constant_resource,
       is_builtin_query=is_builtin_query,
+    )
+
+  def _generate_bing_helper(self) -> QueryElements:
+    query_dict = yaml.safe_load(self.text)
+    additional = {}
+    additional['service'] = query_dict['service']
+    additional['target_name'] = query_dict['target_name']
+    resource_name = query_dict['source_name']
+    fields = [c['field'] for c in query_dict['columns']]
+    column_names = [c['name'] for c in query_dict['columns']]
+    customizers = {}
+    for field in fields:
+      customizers[field] = {
+        'type': 'nested_resource',
+        'value': query_dict['target_name'] + ":" + field
+      }
+    return QueryElements(
+      query_title=self.title,
+      query_text=self.text,
+      fields=fields,
+      column_names=column_names,
+      resource_name=resource_name,
+      virtual_columns={},
+      additional=additional,
+      customizers=customizers
     )
 
   def create_query_text(
